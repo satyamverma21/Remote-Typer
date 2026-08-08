@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Remote Typer</title>
+
+    <style>
+        body {
+            font-family: Arial;
+            max-width: 700px;
+            margin: 50px auto;
+        }
+
+        textarea {
+            width: 100%;
+            height: 300px;
+            font-size: 18px;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+
+        button {
+            width: 100%;
+            height: 60px;
+            margin-top: 15px;
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        #status {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h2>Remote Typer</h2>
+
+<textarea
+    id="text"
+    placeholder="Paste text here...">
+</textarea>
+
+<button onclick="sendText()">
+    SEND
+</button>
+
+<div id="status">Ready</div>
+
+<script>
+async function sendText() {
+
+    const text = document.getElementById("text").value;
+    const status = document.getElementById("status");
+
+    if (!text.trim()) {
+        status.innerText = "Enter some text";
+        return;
+    }
+
+    status.innerText = "Sending...";
+
+    try {
+
+        const response = await fetch(
+            "http://192.168.1.12:5000/type",
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json"
+                },
+
+                body: JSON.stringify({
+                    text: text
+                })
+            }
+        );
+
+        if (response.ok) {
+            status.innerText = "Sent ✓";
+        } else {
+            status.innerText = "Failed";
+        }
+
+    } catch (error) {
+        status.innerText = "Cannot connect to Laptop 2";
+        console.error(error);
+    }
+}
+</script>
+
+</body>
+</html>
