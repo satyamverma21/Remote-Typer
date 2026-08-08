@@ -91,6 +91,14 @@ The clipboard is currently not restored after a Unicode fallback. If clipboard p
 
 For alphanumeric characters, `errorRate` may cause a nearby wrong key to be typed, followed by a pause, Backspace, and correction pause. Punctuation and whitespace are not selected for simulated errors. The keyboard-neighbor map is defined in `getWrongCharacter()`.
 
+## Optional Code Mode
+
+`POST /type` accepts an optional `codeMode` object. If it is absent or disabled, the executor sends no additional keystrokes. When enabled, it dismisses GUI autocomplete before Enter/Tab (toggleable), selects editor-generated indentation with cleanup-safe `Shift+Home`, and lets the first source character type over that selection. It never deletes possibly empty indentation selections.
+
+Modern-editor type-over is the default closer strategy. An opt-in fallback stack can move over auto-inserted brackets, with a separate best-effort option for quotes. The two closer strategies are mutually exclusive and validated at the API boundary. Escape-based autocomplete dismissal must be disabled for Vim, Neovim, and other modal editors because it exits insert mode.
+
+Code Mode is blind and heuristic because Remote Typer cannot inspect the target editor. `verifiedMode` is reserved but currently rejected when enabled; clipboard-coordinated verification has not been implemented.
+
 ## Safety and limitations
 
 - The server enables CORS and listens on all network interfaces.

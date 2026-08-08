@@ -110,6 +110,30 @@
             font-size: 15px;
         }
 
+        .code-mode {
+            margin-top: 15px;
+            background: #1f2937;
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        .code-mode-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px 20px;
+            margin-top: 12px;
+        }
+
+        .code-mode label {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .code-mode input[type="checkbox"] {
+            width: auto;
+        }
+
         .buttons {
             display: grid;
             grid-template-columns:
@@ -278,6 +302,39 @@
 
     </div>
 
+    <div class="code-mode">
+        <label>
+            <input id="codeModeEnabled" type="checkbox">
+            <strong>Code Mode</strong>
+        </label>
+
+        <div class="code-mode-options">
+            <label>
+                <input id="dismissAutocomplete" type="checkbox" checked>
+                Dismiss autocomplete before Enter/Tab
+            </label>
+
+            <label>
+                <input id="autoCloseTypeOver" type="checkbox" checked>
+                Editor supports closer type-over
+            </label>
+
+            <label>
+                <input id="bracketSkipStack" type="checkbox">
+                Skip auto-inserted brackets
+            </label>
+
+            <label>
+                <input id="quoteSkipStack" type="checkbox">
+                Also skip quotes (best-effort)
+            </label>
+        </div>
+
+        <div class="hint">
+            Code Mode safely replaces editor auto-indentation. Turn autocomplete dismissal off for Vim, Neovim, and other modal editors. If your editor duplicates closing brackets, turn off type-over and enable bracket skipping.
+        </div>
+    </div>
+
 
     <div class="buttons">
 
@@ -333,6 +390,32 @@ document
     .getElementById("variation")
     .previousElementSibling
     .innerText = "Word Rhythm Variation %";
+
+const autoCloseTypeOverInput = document.getElementById("autoCloseTypeOver");
+const bracketSkipStackInput = document.getElementById("bracketSkipStack");
+const quoteSkipStackInput = document.getElementById("quoteSkipStack");
+
+autoCloseTypeOverInput.addEventListener("change", () => {
+    if (autoCloseTypeOverInput.checked) {
+        bracketSkipStackInput.checked = false;
+        quoteSkipStackInput.checked = false;
+    }
+});
+
+bracketSkipStackInput.addEventListener("change", () => {
+    if (bracketSkipStackInput.checked) {
+        autoCloseTypeOverInput.checked = false;
+    } else {
+        quoteSkipStackInput.checked = false;
+    }
+});
+
+quoteSkipStackInput.addEventListener("change", () => {
+    if (quoteSkipStackInput.checked) {
+        bracketSkipStackInput.checked = true;
+        autoCloseTypeOverInput.checked = false;
+    }
+});
 
 function baseURL() {
     const ip =
@@ -483,6 +566,25 @@ async function sendText() {
                 .value
         );
 
+    const codeModeEnabled =
+        document
+            .getElementById("codeModeEnabled")
+            .checked;
+
+    const codeMode = codeModeEnabled
+        ? {
+            enabled: true,
+            autoIndent: true,
+            dismissAutocomplete: document
+                .getElementById("dismissAutocomplete")
+                .checked,
+            autoCloseTypeOver: autoCloseTypeOverInput.checked,
+            bracketSkipStack: bracketSkipStackInput.checked,
+            quoteSkipStack: quoteSkipStackInput.checked,
+            verifiedMode: false
+        }
+        : null;
+
 
     const sendBtn =
         document.getElementById(
@@ -519,7 +621,8 @@ async function sendText() {
                             text,
                             speed,
                             variation,
-                            errorRate
+                            errorRate,
+                            ...(codeMode ? { codeMode } : {})
                         })
                 }
             );

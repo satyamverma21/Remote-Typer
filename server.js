@@ -155,6 +155,121 @@ async function typeUnicodeCharacter(char) {
     }
 }
 
+async function tapKey(key) {
+    let keyIsDown = false;
+
+    try {
+        keyIsDown = true;
+        await keyboard.pressKey(key);
+    } finally {
+        if (keyIsDown) {
+            await keyboard.releaseKey(key);
+        }
+    }
+}
+
+async function selectFromIndentationToLineStart() {
+    let shiftIsDown = false;
+
+    try {
+        shiftIsDown = true;
+        await keyboard.pressKey(Key.LeftShift);
+        await tapKey(Key.Home);
+    } finally {
+        if (shiftIsDown) {
+            await keyboard.releaseKey(Key.LeftShift);
+        }
+    }
+}
+
+const disabledCodeMode = Object.freeze({
+    enabled: false,
+    autoIndent: false,
+    dismissAutocomplete: false,
+    autoCloseTypeOver: false,
+    bracketSkipStack: false,
+    quoteSkipStack: false,
+    verifiedMode: false
+});
+
+function parseCodeMode(value) {
+    if (value === undefined) {
+        return { value: disabledCodeMode };
+    }
+
+    if (
+        value === null ||
+        typeof value !== "object" ||
+        Array.isArray(value)
+    ) {
+        return { error: "codeMode must be an object" };
+    }
+
+    const fields = [
+        "enabled",
+        "autoIndent",
+        "dismissAutocomplete",
+        "autoCloseTypeOver",
+        "bracketSkipStack",
+        "quoteSkipStack",
+        "verifiedMode"
+    ];
+
+    for (const field of fields) {
+        if (value[field] !== undefined && typeof value[field] !== "boolean") {
+            return { error: `codeMode.${field} must be a boolean` };
+        }
+    }
+
+    if (value.enabled !== true) {
+        return { value: disabledCodeMode };
+    }
+
+    const parsed = {
+        enabled: true,
+        autoIndent: value.autoIndent ?? true,
+        dismissAutocomplete: value.dismissAutocomplete ?? true,
+        autoCloseTypeOver: value.autoCloseTypeOver ?? true,
+        bracketSkipStack: value.bracketSkipStack ?? false,
+        quoteSkipStack: value.quoteSkipStack ?? false,
+        verifiedMode: value.verifiedMode ?? false
+    };
+
+    if (!parsed.autoIndent) {
+        return { error: "codeMode.autoIndent must be true when Code Mode is enabled" };
+    }
+
+    if (parsed.autoCloseTypeOver && parsed.bracketSkipStack) {
+        return {
+            error: "codeMode.autoCloseTypeOver and codeMode.bracketSkipStack cannot both be true"
+        };
+    }
+
+    if (parsed.quoteSkipStack && !parsed.bracketSkipStack) {
+        return {
+            error: "codeMode.quoteSkipStack requires codeMode.bracketSkipStack"
+        };
+    }
+
+    if (parsed.verifiedMode) {
+        return {
+            error: "codeMode.verifiedMode is not implemented yet"
+        };
+    }
+
+    return { value: parsed };
+}
+
+function isEscapedCharacter(text, index) {
+    let backslashes = 0;
+
+    for (let position = index - 1; position >= 0 && text[position] === "\\"; position--) {
+        backslashes++;
+    }
+
+    return backslashes % 2 === 1;
+}
+
 async function waitWhilePaused() {
     while (
         typingState.paused &&
@@ -349,7 +464,8 @@ async function humanType(
     text,
     averageSpeed,
     variation,
-    errorRate
+    errorRate,
+    codeMode = disabledCodeMode
 ) {
     typingState.running = true;
 
@@ -369,6 +485,8 @@ async function humanType(
         1.5
     );
     const delays = buildTimingProfile(text, averageSpeed, variation);
+    const closerStack = [];
+    let mustCompleteCodeSequence = false;
 
     try {
         for (
@@ -376,14 +494,16 @@ async function humanType(
             i < text.length;
             i++
         ) {
-            if (typingState.stopped) {
-                break;
-            }
+            if (!mustCompleteCodeSequence) {
+                if (typingState.stopped) {
+                    break;
+                }
 
-            await waitWhilePaused();
+                await waitWhilePaused();
 
-            if (typingState.stopped) {
-                break;
+                if (typingState.stopped) {
+                    break;
+                }
             }
 
             const characterIndex = i;
@@ -428,41 +548,68 @@ async function humanType(
                 );
             }
 
-        // newline
-        if (char === "\n") {
-            await keyboard.pressKey(
-                Key.Enter
-            );
+            // Escape dismisses GUI-editor completion popups. It must be
+            // disabled for Vim/Neovim because Escape exits insert mode.
+            if (char === "\n") {
+                if (codeMode.enabled && codeMode.dismissAutocomplete) {
+                    await tapKey(Key.Escape);
+                }
 
-            await keyboard.releaseKey(
-                Key.Enter
-            );
+                await tapKey(Key.Enter);
 
-            await sleep(
-                delay +
-                    randomBetween(
-                        120 * pauseScale,
-                        280 * pauseScale
-                    )
-            );
+                if (codeMode.enabled && codeMode.autoIndent) {
+                    // Select any editor-generated indentation. The first
+                    // source character on the next line types over it; no
+                    // Backspace/Delete is safe here because selection may be empty.
+                    await selectFromIndentationToLineStart();
+                    mustCompleteCodeSequence = true;
+                } else {
+                    mustCompleteCodeSequence = false;
+                }
 
-            
-            continue;
-        }
+                await sleep(
+                    delay +
+                        randomBetween(
+                            120 * pauseScale,
+                            280 * pauseScale
+                        )
+                );
+
+                continue;
+            }
 
             // tab
             if (char === "\t") {
-                await keyboard.pressKey(
-                    Key.Tab
-                );
+                if (codeMode.enabled && codeMode.dismissAutocomplete) {
+                    await tapKey(Key.Escape);
+                }
 
-                await keyboard.releaseKey(
-                    Key.Tab
-                );
+                await tapKey(Key.Tab);
+                mustCompleteCodeSequence = false;
 
                 await sleep(delay);
 
                 continue;
+            }
+
+            if (codeMode.enabled && codeMode.bracketSkipStack) {
+                const expectedCloser = closerStack[closerStack.length - 1];
+                const isQuote = char === "\"" || char === "'" || char === "`";
+                const canSkipQuote = codeMode.quoteSkipStack &&
+                    isQuote &&
+                    !isEscapedCharacter(text, characterIndex);
+                const canSkipBracket = /[)\]}]/.test(char);
+
+                if (
+                    char === expectedCloser &&
+                    (canSkipBracket || canSkipQuote)
+                ) {
+                    closerStack.pop();
+                    await tapKey(Key.Right);
+                    mustCompleteCodeSequence = false;
+                    await sleep(delay);
+                    continue;
+                }
             }
 
             const shouldMakeError =
@@ -508,6 +655,29 @@ async function humanType(
                 await typeUnicodeCharacter(char);
             }
 
+            if (codeMode.enabled && codeMode.bracketSkipStack) {
+                const bracketPairs = {
+                    "(": ")",
+                    "[": "]",
+                    "{": "}"
+                };
+                const isQuote = char === "\"" || char === "'" || char === "`";
+
+                if (bracketPairs[char]) {
+                    closerStack.push(bracketPairs[char]);
+                } else if (
+                    codeMode.quoteSkipStack &&
+                    isQuote &&
+                    !isEscapedCharacter(text, characterIndex)
+                ) {
+                    closerStack.push(char);
+                }
+            }
+
+            // If Shift+Home selected editor indentation, this character has
+            // now safely replaced that selection. Pause/stop may resume.
+            mustCompleteCodeSequence = false;
+
             // A short pause after a word is more natural than a random
             // hesitation on arbitrary characters.
             if (char === " ") {
@@ -546,18 +716,28 @@ app.post("/type", async (req, res) => {
         text,
         speed = 100,
         variation = 40,
-        errorRate = 1
+        errorRate = 1,
+        codeMode
     } = req.body;
 
     const parsedSpeed = Number(speed);
     const parsedVariation = Number(variation);
     const parsedErrorRate = Number(errorRate);
+    const parsedCodeMode = parseCodeMode(codeMode);
 
     if (typeof text !== "string" || text.length === 0) {
         return res
             .status(400)
             .json({
                 error: "Text must be a non-empty string"
+            });
+    }
+
+    if (parsedCodeMode.error) {
+        return res
+            .status(400)
+            .json({
+                error: parsedCodeMode.error
             });
     }
 
@@ -601,7 +781,8 @@ app.post("/type", async (req, res) => {
         text,
         parsedSpeed,
         parsedVariation,
-        parsedErrorRate
+        parsedErrorRate,
+        parsedCodeMode.value
     );
 });
 
