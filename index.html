@@ -253,7 +253,7 @@
                 type="number"
                 value="40"
                 min="0"
-                max="500"
+                max="100"
             >
 
         </div>
@@ -328,6 +328,11 @@
 <script>
 
 let lastStatus = "offline";
+
+document
+    .getElementById("variation")
+    .previousElementSibling
+    .innerText = "Word Rhythm Variation %";
 
 function baseURL() {
     const ip =

@@ -4,8 +4,20 @@ const os = require("os");
 
 const {
     keyboard,
-    Key
+    clipboard,
+    Key,
+    providerRegistry
 } = require("@nut-tree-fork/nut-js");
+
+// Nut.js defaults to 300 ms before every keyboard event. The application
+// already controls timing, so leave both Nut.js delay layers disabled.
+keyboard.config.autoDelayMs = 0;
+
+if (providerRegistry.hasKeyboard()) {
+    providerRegistry
+        .getKeyboard()
+        .setKeyboardDelay(0);
+}
 
 const app = express();
 
@@ -115,6 +127,34 @@ function getWrongCharacter(char) {
     return char;
 }
 
+function isNativeKeyboardCharacter(char) {
+    if (char.length !== 1) {
+        return false;
+    }
+
+    const code = char.charCodeAt(0);
+
+    // libnut reliably maps printable ASCII. Other Unicode characters can
+    // produce malformed native key events on some platforms/layouts.
+    return code >= 0x20 && code <= 0x7e;
+}
+
+async function typeUnicodeCharacter(char) {
+    await clipboard.setContent(char);
+
+    let controlIsDown = false;
+
+    try {
+        await keyboard.pressKey(Key.LeftControl);
+        controlIsDown = true;
+        await keyboard.type("v");
+    } finally {
+        if (controlIsDown) {
+            await keyboard.releaseKey(Key.LeftControl);
+        }
+    }
+}
+
 async function waitWhilePaused() {
     while (
         typingState.paused &&
@@ -122,6 +162,90 @@ async function waitWhilePaused() {
     ) {
         await sleep(100);
     }
+}
+
+function isWordCharacter(char) {
+    return /[\p{L}\p{N}]/u.test(char);
+}
+
+function isVowel(char) {
+    return /[aeiouy]/i.test(char);
+}
+
+function getChunkBoundaries(word) {
+    if (word.length < 8) {
+        return [];
+    }
+
+    const candidates = [];
+
+    for (let i = 2; i < word.length - 2; i++) {
+        if (isVowel(word[i]) !== isVowel(word[i + 1])) {
+            candidates.push(i);
+        }
+    }
+
+    const selected = [];
+    const maxBoundaries = word.length >= 12 ? 2 : 1;
+
+    while (selected.length < maxBoundaries && candidates.length > 0) {
+        const candidateIndex = Math.floor(Math.random() * candidates.length);
+        const boundary = candidates.splice(candidateIndex, 1)[0];
+
+        if (selected.every(existing => Math.abs(existing - boundary) > 2)) {
+            selected.push(boundary);
+        }
+    }
+
+    return selected;
+}
+
+function buildTimingProfile(text, averageSpeed, variation) {
+    const delays = Array.from({ length: text.length }, () => averageSpeed);
+    const wordVariation = clamp(variation / 100, 0, 1);
+    let tempo = 1;
+    let index = 0;
+
+    while (index < text.length) {
+        if (!isWordCharacter(text[index])) {
+            index++;
+            continue;
+        }
+
+        const start = index;
+        while (index < text.length && isWordCharacter(text[index])) {
+            index++;
+        }
+
+        const word = text.slice(start, index);
+        tempo = clamp(tempo + randomBetween(-0.08, 0.08), 0.78, 1.22);
+        const wordTempo = clamp(
+            tempo * randomBetween(
+                1 - wordVariation * 0.45,
+                1 + wordVariation * 0.45
+            ),
+            0.5,
+            1.8
+        );
+        const microVariation = clamp(averageSpeed * 0.06, 1, 35);
+
+        for (let position = start; position < index; position++) {
+            delays[position] = clamp(
+                averageSpeed * wordTempo + randomBetween(-microVariation, microVariation),
+                1,
+                5000
+            );
+        }
+
+        for (const boundary of getChunkBoundaries(word)) {
+            if (Math.random() < 0.38) {
+                delays[start + boundary] += randomBetween(35, 110) *
+                    clamp(averageSpeed / 100, 0.6, 1.5);
+            }
+        }
+    }
+
+    return delays;
 }
 
 async function humanType(
@@ -132,19 +256,22 @@ async function humanType(
 ) {
     typingState.running = true;
 
-    // Keep a slowly changing tempo. Human typing usually happens in
-    // short bursts instead of using a completely independent delay for
-    // every character.
-    let tempo = 1;
     const pauseScale = clamp(
         averageSpeed / 100,
         0.05,
         1.5
     );
-    const effectiveVariation = Math.min(
-        variation,
-        Math.max(0, averageSpeed * 0.55)
+    const wordGapBase = clamp(
+        averageSpeed * 0.45,
+        25,
+        120
     );
+    const hesitationScale = clamp(
+        averageSpeed / 100,
+        0.5,
+        1.5
+    );
+    const delays = buildTimingProfile(text, averageSpeed, variation);
 
     try {
         for (
@@ -162,26 +289,22 @@ async function humanType(
                 break;
             }
 
-            const char = text[i];
+            const characterIndex = i;
+            const codePoint = text.codePointAt(i);
+            const char = String.fromCodePoint(codePoint);
+            const characterLength = char.length;
+
+            // A supplementary Unicode character occupies two UTF-16 code
+            // units, but must be inserted as one clipboard value.
+            i += characterLength - 1;
 
             // Ignore the carriage-return half of Windows-style newlines.
             if (char === "\r") {
                 continue;
             }
 
-            tempo = clamp(
-                tempo + randomBetween(-0.018, 0.018),
-                0.88,
-                1.12
-            );
-
-            const jitter = randomBetween(
-                -effectiveVariation,
-                effectiveVariation
-            ) * 0.55;
-
             let delay = clamp(
-                averageSpeed * tempo + jitter,
+                delays[characterIndex],
                 1,
                 5000
             );
@@ -282,20 +405,24 @@ async function humanType(
                 );
             }
 
-            await keyboard.type(char);
+            if (isNativeKeyboardCharacter(char)) {
+                await keyboard.type(char);
+            } else {
+                await typeUnicodeCharacter(char);
+            }
 
             // A short pause after a word is more natural than a random
             // hesitation on arbitrary characters.
             if (char === " ") {
                 delay += randomBetween(
-                    20 * pauseScale,
-                    70 * pauseScale
+                    wordGapBase * 0.65,
+                    wordGapBase * 1.35
                 );
 
                 if (Math.random() < 0.08) {
                     delay += randomBetween(
-                        100 * pauseScale,
-                        300 * pauseScale
+                        100 * hesitationScale,
+                        300 * hesitationScale
                     );
                 }
             }
@@ -343,7 +470,7 @@ app.post("/type", async (req, res) => {
         parsedSpeed > 1000 ||
         !Number.isFinite(parsedVariation) ||
         parsedVariation < 0 ||
-        parsedVariation > 500 ||
+        parsedVariation > 100 ||
         !Number.isFinite(parsedErrorRate) ||
         parsedErrorRate < 0 ||
         parsedErrorRate > 20
@@ -351,7 +478,7 @@ app.post("/type", async (req, res) => {
         return res
             .status(400)
             .json({
-                error: "Invalid typing settings"
+                error: "Invalid typing settings. Speed must be 1-1000, rhythm variation 0-100, and error rate 0-20."
             });
     }
 

@@ -37,11 +37,13 @@ Keep this terminal running.
 1. Open `index.html` in a browser on the controller computer.
 2. Enter the receiver computer's IP address in the IP field.
 3. Paste text into **Text To Type**.
-4. Set the average delay in milliseconds per character.
+4. Set the average delay in milliseconds per character. The receiver uses this as a baseline, then varies the tempo per word.
 5. Click **SEND**.
 6. Focus the destination application during the three-second countdown.
 
 Lower speed values type faster. For example, `50` is faster than `100`, and `1` is the fastest requested setting. Actual timing can be slower because of operating-system and keyboard-event overhead.
+
+**Word Rhythm Variation** controls how much the speed changes from word to word. Words are typed in coherent bursts; long or complex words may occasionally contain a brief adaptive pause rather than receiving random delays on every character.
 
 The **Scratch Pad** is local only and is never sent automatically.
 
@@ -82,6 +84,10 @@ Settings:
 - `errorRate`: `0`–`20` percent simulated typing errors
 
 ### Other endpoints
+
+The `variation` setting controls word-level tempo variation rather than independent character jitter. Values must be between `0` and `100`.
+
+Use a value from `0` to `100`: low values keep words close to the same tempo, while higher values make word speeds and pauses more distinct. Word gaps have a practical minimum so they remain perceptible even when the character speed is very fast.
 
 ```text
 POST /pause
