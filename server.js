@@ -172,6 +172,72 @@ function isVowel(char) {
     return /[aeiouy]/i.test(char);
 }
 
+const qwertyKeys = {
+    q: { hand: "left", finger: "pinky", row: 0 },
+    a: { hand: "left", finger: "pinky", row: 1 },
+    z: { hand: "left", finger: "pinky", row: 2 },
+    w: { hand: "left", finger: "ring", row: 0 },
+    s: { hand: "left", finger: "ring", row: 1 },
+    x: { hand: "left", finger: "ring", row: 2 },
+    e: { hand: "left", finger: "middle", row: 0 },
+    d: { hand: "left", finger: "middle", row: 1 },
+    c: { hand: "left", finger: "middle", row: 2 },
+    r: { hand: "left", finger: "index", row: 0 },
+    f: { hand: "left", finger: "index", row: 1 },
+    v: { hand: "left", finger: "index", row: 2 },
+    t: { hand: "left", finger: "index", row: 0 },
+    g: { hand: "left", finger: "index", row: 1 },
+    b: { hand: "left", finger: "index", row: 2 },
+    y: { hand: "right", finger: "index", row: 0 },
+    h: { hand: "right", finger: "index", row: 1 },
+    n: { hand: "right", finger: "index", row: 2 },
+    u: { hand: "right", finger: "index", row: 0 },
+    j: { hand: "right", finger: "index", row: 1 },
+    m: { hand: "right", finger: "index", row: 2 },
+    i: { hand: "right", finger: "middle", row: 0 },
+    k: { hand: "right", finger: "middle", row: 1 },
+    o: { hand: "right", finger: "ring", row: 0 },
+    l: { hand: "right", finger: "ring", row: 1 },
+    p: { hand: "right", finger: "pinky", row: 0 }
+};
+
+function getDigraphMultiplier(previous, current) {
+    const first = qwertyKeys[previous.toLowerCase()];
+    const second = qwertyKeys[current.toLowerCase()];
+
+    if (!first || !second) {
+        return 1;
+    }
+
+    if (previous.toLowerCase() === current.toLowerCase()) {
+        return 0.9;
+    }
+
+    if (first.hand !== second.hand) {
+        return 0.86;
+    }
+
+    if (first.finger === second.finger) {
+        return 1.42;
+    }
+
+    return Math.abs(first.row - second.row) > 0 ? 1.16 : 1.04;
+}
+
+function getWordPlanningDelay(word, followsSentenceEnd, averageSpeed) {
+    const lengthCost = clamp(Math.max(0, word.length - 4) * 2.5, 0, 24);
+    const rareLetters = (word.match(/[qxzj]/gi) || []).length;
+    const rarityCost = clamp(rareLetters * 8 + (word.length > 8 ? 10 : 0), 0, 30);
+    const sentenceCost = followsSentenceEnd ? 18 : 0;
+    const scale = clamp(averageSpeed / 100, 0.45, 1.5);
+
+    return (lengthCost + rarityCost + sentenceCost) * scale;
+}
+
+function randomExponential(mean) {
+    return -Math.log(Math.max(Number.EPSILON, Math.random())) * mean;
+}
+
 function getChunkBoundaries(word) {
     if (word.length < 8) {
         return [];
@@ -204,10 +270,15 @@ function buildTimingProfile(text, averageSpeed, variation) {
     const delays = Array.from({ length: text.length }, () => averageSpeed);
     const wordVariation = clamp(variation / 100, 0, 1);
     let tempo = 1;
+    let longRangeDrift = 1;
     let index = 0;
+    let followsSentenceEnd = false;
 
     while (index < text.length) {
         if (!isWordCharacter(text[index])) {
+            if (/[.!?]/.test(text[index])) {
+                followsSentenceEnd = true;
+            }
             index++;
             continue;
         }
@@ -219,22 +290,46 @@ function buildTimingProfile(text, averageSpeed, variation) {
 
         const word = text.slice(start, index);
         tempo = clamp(tempo + randomBetween(-0.08, 0.08), 0.78, 1.22);
+        longRangeDrift = clamp(
+            longRangeDrift + randomBetween(-0.025, 0.035),
+            0.88,
+            1.16
+        );
         const wordTempo = clamp(
-            tempo * randomBetween(
+            tempo * longRangeDrift * randomBetween(
                 1 - wordVariation * 0.45,
                 1 + wordVariation * 0.45
             ),
             0.5,
             1.8
         );
-        const microVariation = clamp(averageSpeed * 0.06, 1, 35);
-
         for (let position = start; position < index; position++) {
+            const current = text[position];
+            const digraphMultiplier = position === start
+                ? 1
+                : getDigraphMultiplier(text[position - 1], current);
+            const rightSkewedTail = randomExponential(
+                clamp(averageSpeed * 0.035, 0.15, 8)
+            );
+            const shiftLatency = /[A-Z]/.test(current)
+                ? clamp(averageSpeed * 0.08, 1, 12)
+                : 0;
+
             delays[position] = clamp(
-                averageSpeed * wordTempo + randomBetween(-microVariation, microVariation),
+                averageSpeed * wordTempo * digraphMultiplier +
+                    rightSkewedTail +
+                    shiftLatency,
                 1,
                 5000
             );
+
+            if (position === start) {
+                delays[position] += getWordPlanningDelay(
+                    word,
+                    followsSentenceEnd,
+                    averageSpeed
+                );
+            }
         }
 
         for (const boundary of getChunkBoundaries(word)) {
@@ -243,6 +338,8 @@ function buildTimingProfile(text, averageSpeed, variation) {
                     clamp(averageSpeed / 100, 0.6, 1.5);
             }
         }
+
+        followsSentenceEnd = false;
     }
 
     return delays;
