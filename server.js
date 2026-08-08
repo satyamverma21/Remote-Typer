@@ -381,11 +381,27 @@ function getChunkBoundaries(word) {
     return selected;
 }
 
+function chooseRhythmState(previousState) {
+    const roll = Math.random();
+
+    if (previousState === "fast") {
+        return roll < 0.35 ? "fast" : roll < 0.85 ? "normal" : "slow";
+    }
+
+    if (previousState === "slow") {
+        return roll < 0.15 ? "fast" : roll < 0.7 ? "normal" : "slow";
+    }
+
+    return roll < 0.3 ? "fast" : roll < 0.7 ? "normal" : "slow";
+}
+
 function buildTimingProfile(text, averageSpeed, variation) {
     const delays = Array.from({ length: text.length }, () => averageSpeed);
+    const wordGapFactors = Array.from({ length: text.length }, () => 1);
     const wordVariation = clamp(variation / 100, 0, 1);
     let tempo = 1;
     let longRangeDrift = 1;
+    let rhythmState = "normal";
     let index = 0;
     let followsSentenceEnd = false;
 
@@ -404,17 +420,27 @@ function buildTimingProfile(text, averageSpeed, variation) {
         }
 
         const word = text.slice(start, index);
-        tempo = clamp(tempo + randomBetween(-0.08, 0.08), 0.78, 1.22);
+        rhythmState = chooseRhythmState(rhythmState);
+        tempo = clamp(
+            tempo + randomBetween(-0.08, 0.08) * wordVariation,
+            0.78,
+            1.22
+        );
         longRangeDrift = clamp(
-            longRangeDrift + randomBetween(-0.025, 0.035),
+            longRangeDrift +
+                randomBetween(-0.025, 0.035) * wordVariation,
             0.88,
             1.16
         );
+        const stateTargets = {
+            fast: 0.75,
+            normal: 1,
+            slow: 1.45
+        };
+        const stateMultiplier = 1 +
+            (stateTargets[rhythmState] - 1) * wordVariation;
         const wordTempo = clamp(
-            tempo * longRangeDrift * randomBetween(
-                1 - wordVariation * 0.45,
-                1 + wordVariation * 0.45
-            ),
+            tempo * longRangeDrift * stateMultiplier,
             0.5,
             1.8
         );
@@ -454,10 +480,25 @@ function buildTimingProfile(text, averageSpeed, variation) {
             }
         }
 
+        if (text[index] === " ") {
+            const gapTargets = {
+                fast: 0.45,
+                normal: 1,
+                slow: 2.2
+            };
+
+            wordGapFactors[index] = 1 +
+                (gapTargets[rhythmState] - 1) * wordVariation;
+        }
+
         followsSentenceEnd = false;
     }
 
-    return delays;
+    return {
+        delays,
+        wordGapFactors,
+        variationStrength: wordVariation
+    };
 }
 
 async function humanType(
@@ -484,7 +525,12 @@ async function humanType(
         0.5,
         1.5
     );
-    const delays = buildTimingProfile(text, averageSpeed, variation);
+    const timingProfile = buildTimingProfile(text, averageSpeed, variation);
+    const {
+        delays,
+        wordGapFactors,
+        variationStrength
+    } = timingProfile;
     const closerStack = [];
     let mustCompleteCodeSequence = false;
 
@@ -681,12 +727,9 @@ async function humanType(
             // A short pause after a word is more natural than a random
             // hesitation on arbitrary characters.
             if (char === " ") {
-                delay += randomBetween(
-                    wordGapBase * 0.65,
-                    wordGapBase * 1.35
-                );
+                delay += wordGapBase * wordGapFactors[characterIndex];
 
-                if (Math.random() < 0.08) {
+                if (Math.random() < 0.08 * variationStrength) {
                     delay += randomBetween(
                         100 * hesitationScale,
                         300 * hesitationScale
@@ -744,7 +787,7 @@ app.post("/type", async (req, res) => {
     if (
         !Number.isFinite(parsedSpeed) ||
         parsedSpeed < 1 ||
-        parsedSpeed > 1000 ||
+        parsedSpeed > 150 ||
         !Number.isFinite(parsedVariation) ||
         parsedVariation < 0 ||
         parsedVariation > 100 ||
@@ -755,7 +798,7 @@ app.post("/type", async (req, res) => {
         return res
             .status(400)
             .json({
-                error: "Invalid typing settings. Speed must be 1-1000, rhythm variation 0-100, and error rate 0-20."
+                error: "Invalid typing settings. Speed must be 1-150, rhythm variation 0-100, and error rate 0-20."
             });
     }
 

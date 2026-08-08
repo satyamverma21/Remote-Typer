@@ -40,7 +40,7 @@ Request body:
 ```
 
 - `text`: required non-empty string.
-- `speed`: `1`–`1000`, interpreted as the baseline delay in milliseconds per character. Lower is faster; `1` is the fastest requested setting.
+- `speed`: `1`–`150`, interpreted as the baseline delay in milliseconds per character. Lower is faster; `1` is the fastest requested setting.
 - `variation`: `0`–`100`, interpreted as word-rhythm variation. It is not a millisecond delay and must not be implemented as independent random jitter for every character.
 - `errorRate`: `0`–`20` percent simulated errors.
 
@@ -60,8 +60,8 @@ Typing state is process-local and supports one active typing job at a time. Ther
 `buildTimingProfile()` creates one delay profile before typing begins:
 
 1. Find contiguous word-like runs using Unicode letters and numbers.
-2. Assign each word a coherent tempo near the previous word's tempo.
-3. Apply the requested word-level variation, with a bounded range.
+2. Assign each word a coherent fast, normal, or slow rhythm state.
+3. Interpolate both word tempo and the following word gap toward that state's targets using the requested variation percentage.
 4. Add only small micro-variation inside a word.
 5. For sufficiently long words, sometimes add an adaptive pause at a vowel/consonant-style chunk boundary.
 
@@ -75,7 +75,7 @@ Typing state is process-local and supports one active typing job at a time. Ther
 
 Important: Nut.js's default event delay is 300 ms. `server.js` explicitly sets both `keyboard.config.autoDelayMs` and the provider keyboard delay to `0`, because the application owns all timing. Do not reintroduce Nut.js's default delay unless the timing model is redesigned around it.
 
-At `variation: 1`, word-to-word differences are intentionally subtle. Use higher values, such as `40`–`80`, to make rhythm changes clearly visible. A value of `100` is the maximum accepted value.
+At `variation: 0`, user-controlled word tempo and gap differences collapse to a neutral multiplier. Higher values make fast, normal, and slow bursts increasingly distinct; `100` is the maximum and remains perceptible at low average speeds through state-dependent word gaps.
 
 ## Keyboard and Unicode behavior
 

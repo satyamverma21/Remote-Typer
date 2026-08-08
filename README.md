@@ -43,7 +43,7 @@ Keep this terminal running.
 
 Lower speed values type faster. For example, `50` is faster than `100`, and `1` is the fastest requested setting. Actual timing can be slower because of operating-system and keyboard-event overhead.
 
-**Word Rhythm Variation** controls how much the speed changes from word to word. Words are typed in coherent bursts; long or complex words may occasionally contain a brief adaptive pause rather than receiving random delays on every character.
+**Word Rhythm Variation** controls coherent fast, normal, and slow word bursts. At fast average speeds, most of the visible difference is expressed through the pause between words so individual characters remain fast. `0%` disables this user-controlled rhythm; `100%` makes the three burst types most distinct.
 
 The **Scratch Pad** is local only and is never sent automatically.
 
@@ -104,7 +104,7 @@ Example request:
 Settings:
 
 - `text`: non-empty string to type
-- `speed`: `1`–`1000` milliseconds per character; lower is faster
+- `speed`: `1`–`150` milliseconds per character; lower is faster
 - `variation`: `0`–`100` percent word-level rhythm variation
 - `errorRate`: `0`–`20` percent simulated typing errors
 
