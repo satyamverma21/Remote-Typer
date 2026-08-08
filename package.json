@@ -1,0 +1,15 @@
+{
+  "name": "remote-typer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remote keyboard typing receiver",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@nut-tree-fork/nut-js": "latest",
+    "cors": "latest",
+    "express": "latest"
+  }
+}
